@@ -23,7 +23,7 @@ This PHP class is designed to automatically update WooCommerce order statuses th
 3. Include it in your `functions.php` or main plugin file.
 
 ```php
-include_once('path/to/WC_Auto_Update_Order_Statuses_Over_Time.php');
+include_once('path/to/class-WC_Auto_Update_Order_Statuses_Over_Time.php');
 ```
 
 ## Usage
@@ -32,7 +32,7 @@ Here's a basic example of how to use the class:
 
 ```php
 // Initialize the class with custom settings
-$auto_update = new WC_Auto_Update_Order_Statuses_Over_Time(90, ['pending'], 'cancelled', 10);
+$auto_update = new WC_Auto_Update_Order_Statuses_Over_Time(90, ['pending','awaiting-payment'], 'cancelled', 10);
 
 // Access properties
 $days = $auto_update->days;
