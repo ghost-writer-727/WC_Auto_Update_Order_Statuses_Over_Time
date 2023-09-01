@@ -37,7 +37,13 @@ $auto_update = new WC_Auto_Update_Order_Statuses_Over_Time(90, ['pending','await
 // Access properties
 $days = $auto_update->days;
 
-// Clear scheduled events (if needed)
+// Set properties after the fact
+$auto_update->days = 45;
+
+// Execute the update_orders method immediately without waiting for the cron job
+$auto_update->update_orders(); 
+
+// Clear scheduled events (useful at plugin deactivation if used within a plugin)
 $auto_update->clear_events();
 ```
 
