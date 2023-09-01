@@ -106,7 +106,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         $orders = wc_get_orders(array(
             'status' => $this->target_statuses,
             'limit' => $this->limit,
-            'date_modified' => '<' . $days_ago, // Only select orders modified more than $this->days days ago.
+            'date_modified' => '<' . $days_ago, // Only select orders modified more than $this->days days ago or more.
         ));
 
         // Loop through each order and update its status.
@@ -114,7 +114,14 @@ class WC_Auto_Update_Order_Statuses_Over_Time
             $previous_status = $order->get_status();
             $order->update_status($this->new_status, "Order status updated to {$this->new_status} after being in {$previous_status} status for {$this->days} days.");
             
-            // Trigger an action after the order status is updated.
+            /** 
+             * Trigger an action after the order status is updated.
+             * 
+             * @param WC_Order $order The order that was updated.
+             * @param string $previous_status The previous status of the order.
+             * @param string $new_status The new status of the order.
+             * @param int $days The minimum number of days since the order was previously updated. This represents the settings at the time this was triggered... not the actual number of days since the order was previously updated.
+             */
             do_action('wc_auto_update_order_statuses_over_time', $order, $previous_status, $this->new_status, $this->days);
         }
     }
