@@ -27,6 +27,9 @@ class WC_Auto_Update_Order_Statuses_Over_Time
     {
         if (!$this->validate_settings($days, $target_statuses, $new_status, $limit)) {
             $this->throw_exception('Invalid settings provided. Check the WordPress error log for details.', 'InvalidArgumentException');
+
+            // If exceptions are hidden, invalidate the class so that it doesn't run.
+            $this->invalidated = true;
             return;
         }
 
@@ -262,9 +265,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      */
     private function throw_exception($message, $exception_class = 'Exception')
     {
-
         if ($this->hide_exceptions) {
-            $this->invalidated = true;
             return;
         }
 
