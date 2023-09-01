@@ -7,6 +7,11 @@ class WC_Auto_Update_Order_Statuses_Over_Time
     const EVENT_HOOK = 'wc_auto_update_order_statuses_over_time';
 
     /**
+     * @var int The maximum number of orders to update per event.
+     */
+    const MAX_LIMIT = 50;
+
+    /**
      * @var int The number of days without updates after which an order should be updated.
      * Set in constructor. Can be set directly.
      * Default is 90.
@@ -118,6 +123,12 @@ class WC_Auto_Update_Order_Statuses_Over_Time
 
         // Hook into the scheduled event.
         add_action(self::EVENT_HOOK, array($this, 'update_orders'));
+
+        // Check if transient exists, in case we had to batch this out.
+        if ($transient = get_transient(self::EVENT_HOOK)) {
+            delete_transient(self::EVENT_HOOK);
+            $this->update_orders();
+        }
     }
 
     /**
@@ -128,6 +139,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         if ($this->invalidated) {
             return null;
         }
+
         // Get the current date and time.
         $current_date = new DateTime();
 
@@ -137,9 +149,17 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         // Query for orders with target statuses.
         $orders = wc_get_orders(array(
             'status' => $this->target_statuses,
-            'limit' => $this->limit,
+            'limit' => $this->limit === -1 || $this->limit > self::MAX_LIMIT ? self::MAX_LIMIT : $this->limit,
             'date_modified' => '<' . $days_ago, // Only select orders modified more than $this->days days ago or more.
         ));
+
+        // If we hit the limit and there may be more orders left, so run again.
+        if( ($this->limit === -1 || $this->limit > self::MAX_LIMIT) && count($orders) === self::MAX_LIMIT ){
+            // Make sure the next batch doesn't overlap with any scheduled events.
+            $next_event_timestamp = wp_next_scheduled(self::EVENT_HOOK);
+            $expiration = $next_event_timestamp - time() - 5; // 5 seconds buffer
+            set_transient( self::EVENT_HOOK, true, $expiration );
+        }
 
         // Loop through each order and update its status.
         foreach ($orders as $order) {
@@ -166,6 +186,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         if ($this->invalidated) {
             return null;
         }
+        delete_transient(self::EVENT_HOOK);
         wp_clear_scheduled_hook(self::EVENT_HOOK);
     }
 
