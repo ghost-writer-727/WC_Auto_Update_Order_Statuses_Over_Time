@@ -108,9 +108,11 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 break;
             default:
                 $this->throw_exception('Invalid property name "' . $name . '" provided.', 'InvalidArgumentException');
+                return null;
         }
 
         $this->throw_exception('Invalid value "' . $value . '" provided for property "' . $name . '".', 'InvalidArgumentException');
+        return null;
     }
 
     /**
