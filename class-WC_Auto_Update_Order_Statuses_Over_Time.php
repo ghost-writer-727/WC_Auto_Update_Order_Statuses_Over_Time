@@ -25,12 +25,6 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      */
     private $target_statuses;
     
-    /**
-     * @var int The number of orders to update per event.
-     * Set in constructor. Can be set directly.
-     * Default is -1, which means all orders will be updated.
-     */
-    private $limit;
 
     /**
      * @var string The status to update the order to.
@@ -39,6 +33,20 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      */
     private $new_status;
     
+    /**
+     * @var int The number of orders to update per event.
+     * Set in constructor. Can be set directly.
+     * Default is -1, which means all orders will be updated.
+     */
+    private $limit;
+
+    /**
+     * @var string The frequency with which to run the event.
+     * Set in constructor. Can be set directly.
+     * Default is 'daily'.
+     */
+    private $frequency;
+
     /**
      * @var bool Whether or not to hide errors.
      * Can be set directly.
@@ -67,9 +75,9 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * @param string $new_status The status to update the order to.
      * @param int $limit The number of orders to update per event.
      */
-    public function __construct($days = 90, $target_statuses = ['pending'], $new_status = 'cancelled', $limit = -1)
+    public function __construct($days = 90, $target_statuses = ['pending'], $new_status = 'cancelled', $limit = -1, $frequency = 'daily')
     {
-        if (!$this->validate_settings($days, $target_statuses, $new_status, $limit)) {
+        if (!$this->validate_settings($days, $target_statuses, $new_status, $limit, $frequency)) {
             $this->throw_exception('Invalid settings provided. Check the WordPress error log for details.', 'InvalidArgumentException');
 
             // If exceptions are hidden, invalidate the class so that it doesn't run.
@@ -153,6 +161,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
             case 'target_statuses':
             case 'new_status':
             case 'limit':
+            case 'frequency':
             case 'event_hook':
             case 'hide_errors':
             case 'block_exceptions':
@@ -176,22 +185,27 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         }        
         switch ($name) {
             case 'days':
-                if ($this->validate_settings($value, $this->target_statuses, $this->new_status, $this->limit)) {
+                if ($this->validate_settings($value, $this->target_statuses, $this->new_status, $this->limit, $this->frequency)) {
                     return $this->{$name};
                 }        
                 break;
             case 'target_statuses':
-                if ($this->validate_settings($this->days, $value, $this->new_status, $this->limit)) {
+                if ($this->validate_settings($this->days, $value, $this->new_status, $this->limit, $this->frequency)) {
                     return $this->{$name};
                 }        
                 break;
             case 'new_status':
-                if ($this->validate_settings($this->days, $this->target_statuses, $value, $this->limit)) {
+                if ($this->validate_settings($this->days, $this->target_statuses, $value, $this->limit, $this->frequency)) {
                     return $this->{$name};
                 }        
                 break;
             case 'limit':
-                if ($this->validate_settings($this->days, $this->target_statuses, $this->new_status, $value)) {
+                if ($this->validate_settings($this->days, $this->target_statuses, $this->new_status, $value, $this->frequency)) {
+                    return $this->{$name};
+                }        
+                break;
+            case 'frequency':
+                if ($this->validate_settings($this->days, $this->target_statuses, $this->new_status, $this->limit, $value)) {
                     return $this->{$name};
                 }        
                 break;
@@ -216,7 +230,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * 
      * @return bool True if the settings are valid, false otherwise.
      */ 
-    private function validate_settings($days, $target_statuses, $new_status, $limit)
+    private function validate_settings($days, $target_statuses, $new_status, $limit, $frequency)
     {
 
         // Force the days to be an integer.
@@ -265,12 +279,20 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         if ($limit < -1) {
             $this->throw_error('The limit must be greater than or equal to -1.');
             return false;
-        }    
+        }
+
+        // Ensure the frequency is a valid frequency.
+        $frequencies = array_keys(wp_get_schedules());
+        if (!in_array($frequency, $frequencies)) {
+            $this->throw_error('The frequency must be one of the following: ' . implode(', ', $frequencies));
+            return false;
+        }
 
         $this->days = $days;
         $this->target_statuses = $target_statuses;
         $this->new_status = $new_status;
         $this->limit = $limit;
+        $this->frequency = $frequency;
 
         return true;
     }    
