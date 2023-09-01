@@ -33,7 +33,11 @@ Here's a basic example of how to use the class:
 
 ```php
 // Initialize the class with custom settings
-$auto_update = new WC_Auto_Update_Order_Statuses_Over_Time(90, ['pending','awaiting-payment'], 'cancelled', 10);
+$auto_update = new WC_Auto_Update_Order_Statuses_Over_Time([
+    'target_statuses' => ['pending','awaiting-payment'],
+    'start' => 'midnight +1 day', // Tonight at midnight
+    'limit' => 10
+]);
 
 // Access properties
 $days = $auto_update->days;
@@ -49,7 +53,6 @@ $auto_update->clear_events();
 ```
 
 ### Constructor Parameters
-
 - `$days`: The number of days after which an order should be updated. Default is 90.
 - `$target_statuses`: An array of order statuses that should be updated. Default is `['pending']`.
 - `$new_status`: The status to update the order to. Default is `'cancelled'`.
@@ -57,12 +60,16 @@ $auto_update->clear_events();
 
 ## Special Considerations
 
+### Updating frequency and start
+
+Using the setter to update the frequency and start will result in canceling all previously scheduled events and scheduling a new one. Care should be taken that this isn't performed on every page load else you could cause the event to trigger every page load if start is set to time() or earlier or you could cause it to never load if start is set to some point in the future.
+
 ### Error Handling and Exception Control
 
 This class has unique features that allow you to control how errors and exceptions are handled:
 
 - `hide_errors`: If set to `true`, WordPress errors will be suppressed.
-- `hide_exceptions`: If set to `true`, exceptions will be suppressed.
+- `block_exceptions`: If set to `true`, exceptions will be suppressed.
 
 Even if errors and exceptions are hidden, the class will be invalidated, preventing further actions until the issues are resolved. This is controlled by the `invalidated` property, which will be set to `true` if any invalid settings are detected.
 

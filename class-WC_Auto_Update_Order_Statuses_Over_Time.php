@@ -72,22 +72,38 @@ class WC_Auto_Update_Order_Statuses_Over_Time
     /**
      * Initialize the class and set hooks.
      * 
-     * @param int $days The number of days after which an order should be updated.
-     * @param array $target_statuses The order statuses that should be updated.
-     * @param string $new_status The status to update the order to.
-     * @param int $limit The number of orders to update per event.
-     * @param string $frequency The frequency with which to run the event.
-     * @param int|string $start The time to start the event. Can be a Unix timestamp or a string that can be parsed by strtotime().
+     * @param array $args The settings for the class:
+     * • @param int $days The number of days after which an order should be updated.
+     * • @param array $target_statuses The order statuses that should be updated.
+     * • @param string $new_status The status to update the order to.
+     * • @param int $limit The number of orders to update per event.
+     * • @param string $frequency The frequency with which to run the event.
+     * • @param int|string $start The time to start the event. Can be a Unix timestamp or a string that can be parsed by strtotime().
      */
-    public function __construct(
-        $days = 90, 
-        $target_statuses = ['pending'], 
-        $new_status = 'cancelled', 
-        $limit = -1, 
-        $frequency = 'daily', 
-        $start = null
-    ){
-        if (!$this->validate_settings($days, $target_statuses, $new_status, $limit, $frequency, $start)) {
+    public function __construct($args = [])
+    {
+        // Check if WooCommerce is active
+        $active_plugins = (array) get_option('active_plugins', []);
+        if (!in_array('woocommerce/woocommerce.php', $active_plugins)) {
+            $this->throw_error('WooCommerce must to be activated first to use ' . __CLASS__ . '.');
+            $this->invalidated = true;
+            return;
+        }
+
+        $defaults = array(
+            'days' => 90,
+            'target_statuses' => ['pending'],
+            'new_status' => 'cancelled',
+            'limit' => -1,
+            'frequency' => 'daily',
+            'start' => time(),
+            'hide_errors' => false,
+            'block_exceptions' => false,
+        );
+
+        $args = wp_parse_args($args, $defaults);
+
+        if (!$this->validate_settings($args)) {
             $this->throw_exception('Invalid settings provided. Check the WordPress error log for details.', 'InvalidArgumentException');
 
             // If exceptions are hidden, invalidate the class so that it doesn't run.
@@ -204,34 +220,12 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         }
         switch ($name) {
             case 'days':
-                if ($this->validate_settings($value, $this->target_statuses, $this->new_status, $this->limit, $this->frequency, $this->start)) {
-                    return $this->{$name};
-                }
-                break;
             case 'target_statuses':
-                if ($this->validate_settings($this->days, $value, $this->new_status, $this->limit, $this->frequency, $this->start)) {
-                    return $this->{$name};
-                }
-                break;
             case 'new_status':
-                if ($this->validate_settings($this->days, $this->target_statuses, $value, $this->limit, $this->frequency, $this->start)) {
-                    return $this->{$name};
-                }
-                break;
             case 'limit':
-                if ($this->validate_settings($this->days, $this->target_statuses, $this->new_status, $value, $this->frequency, $this->start)) {
-                    return $this->{$name};
-                }
-                break;
             case 'frequency':
-                if ($this->validate_settings($this->days, $this->target_statuses, $this->new_status, $this->limit, $value, $this->start)) {
-                    $this->update_events();
-                    return $this->{$name};
-                }
-                break;
             case 'start':
-                if ($this->validate_settings($this->days, $this->target_statuses, $this->new_status, $this->limit, $this->frequency, $value)) {
-                    $this->update_events();
+                if ($this->validate_settings([$name => $value])) {
                     return $this->{$name};
                 }
                 break;
@@ -240,11 +234,8 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 if (is_bool($value)) {
                     return $this->{$name} = $value;
                 }
-                $this->throw_error('The hide_errors property must be a boolean.', false);
+                $this->throw_error('The ' . $name . ' property must be a boolean.', false);
                 break;
-            default:
-                $this->throw_exception('Invalid property name "' . $name . '" provided.', 'InvalidArgumentException');
-                return null;
         }
 
         $this->throw_exception('Invalid value "' . $value . '" provided for property "' . $name . '".', 'InvalidArgumentException');
@@ -254,29 +245,65 @@ class WC_Auto_Update_Order_Statuses_Over_Time
     /**
      * Validate all settings
      * 
-     * @param int $days The number of days after which an order should be updated.
-     * @param array $target_statuses The order statuses that should be updated.
-     * @param string $new_status The status to update the order to.
-     * @param int $limit The number of orders to update per event.
-     * @param string $frequency The frequency with which to run the event.
-     * @param int|string $start The time to start the event. Can be a Unix timestamp or a string that can be parsed by strtotime().
+     * @param array $args The settings to validate.
      * @return bool True if the settings are valid, false otherwise.
      */
-    private function validate_settings($days, $target_statuses, $new_status, $limit, $frequency, $start)
+    protected function validate_settings($args)
     {
+        extract($args);
 
+        $invalid_settings = [];
+        foreach ($args as $name => $value) {
+            $method_name = 'validate_' . $name;
+
+            if (!method_exists($this, $method_name)) {
+                $this->throw_error('Invalid setting "' . $name . '" provided.');
+                $invalid_settings[] = $name;
+                continue;
+            }
+
+            $valid_value = $this->$method_name($value);
+            if ($valid_value !== null) {
+                $this->{$name} = $valid_value;
+            } else {
+                $invalid_settings[] = $name;
+            }
+        }
+
+        return empty($invalid_settings);
+    }
+
+    /**
+     * Validate the days setting.
+     * 
+     * @param int|string $days The number of days after which an order should be updated.
+     * @return int|null The number of days after which an order should be updated, or null if the setting is invalid.
+     */
+    protected function validate_days($days)
+    {
         // Force the days to be an integer.
         if (!is_numeric($days)) {
             $this->throw_error('The days must be numeric.');
-            return false;
+            return null;
         }
 
         $days = intval($days);
         if ($days < 1) {
             $this->clear_events();
-            return false;
+            return null;
         }
 
+        return $days;
+    }
+
+    /**
+     * Validate the target statuses setting.
+     * 
+     * @param array|string $target_statuses The order statuses that should be updated.
+     * @return array|null The order statuses that should be updated, or null if the setting is invalid.
+     */
+    protected function validate_target_statuses($target_statuses)
+    {
         // Force the target statuses to be an array.
         $target_statuses = is_array($target_statuses)
             ? $target_statuses
@@ -286,64 +313,110 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         foreach ($target_statuses as $status) {
             if (!is_string($status)) {
                 $this->throw_error('The target statuses must be strings.');
-                return false;
+                return null;
             }
         }
+        if ($this->statuses_conflict($this->new_status, $target_statuses)) {
+            return null;
+        }
+        return $target_statuses;
+    }
 
+    /**
+     * Validate the new status setting.
+     * 
+     * @param string $new_status The status to update the order to.
+     * @return string|null The status to update the order to, or null if the setting is invalid.
+     */
+    protected function validate_new_status($new_status)
+    {
         // Trigger a WordPress error if the target statuses are not strings.
         if (!is_string($new_status)) {
             $this->throw_error('The new status must be a string.');
-            return false;
+            return null;
+        }
+        if ($this->statuses_conflict($new_status, $this->target_statuses)) {
+            return null;
         }
 
+        return $new_status;
+    }
+
+    /**
+     * Check that the new status is not in the target statuses.
+     * 
+     * @param string $new_status The new status to check.
+     * @param array $target_statuses The target statuses to check against.
+     * @return bool True if the new status is in the target statuses, false otherwise.
+     */
+    private function statuses_conflict($new_status, $target_statuses)
+    {
         // Trigger a WordPress error if the new status is in the target statuses.
         if (in_array($new_status, $target_statuses)) {
             $this->throw_error('The new status cannot be one of the target statuses.');
-            return false;
+            return true;
         }
+        return false;
+    }
 
+    /**
+     * Validate the limit setting.
+     * 
+     * @param int $limit The number of orders to update per event.
+     * @return int|null The number of orders to update per event, or null if the setting is invalid.
+     */
+    protected function validate_limit($limit)
+    {
         // Force the limit to be an integer per the documentation for wc_get_orders().
         if (!is_numeric($limit)) {
             $this->throw_error('The limit must be an integer.');
-            return false;
+            return null;
         }
         $limit = intval($limit);
         if ($limit < -1) {
             $this->throw_error('The limit must be greater than or equal to -1.');
-            return false;
+            return null;
         }
+        return $limit;
+    }
 
+    /**
+     * Validate the frequency setting.
+     * 
+     * @param string $frequency The frequency with which to run the event.
+     * @return string|null The frequency with which to run the event, or null if the setting is invalid.
+     */
+    protected function validate_frequency($frequency)
+    {
         // Ensure the frequency is a valid frequency.
         $frequencies = array_keys(wp_get_schedules());
         if (!in_array($frequency, $frequencies)) {
             $this->throw_error('The frequency must be one of the following: ' . implode(', ', $frequencies));
-            return false;
+            return null;
         }
+        return $frequency;
+    }
 
+    /**
+     * Validate the start setting.
+     * 
+     * @param int|string $start The time to start the event. Can be a Unix timestamp or a string that can be parsed by strtotime().
+     * @return int|null The time to start the event, or null if the setting is invalid.
+     */
+    protected function validate_start($start)
+    {
         // Force the start to a valid timestamp.
-        if( $start === null ) {
-            $start = time();
+        if (is_numeric($start)) {
+            $start = intval($start);
         } else if (is_string($start)) {
             $start = strtotime($start);
-            if( ! $start ){
-                $this->throw_error('The start must be a valid timestamp or a string that can be parsed by strtotime().');
-                return false;
-            }
-        } else if (is_numeric($start)){
-            $start = intval($start);
-        } else {
-            $this->throw_error('The start must be a valid timestamp or a string that can be parsed by strtotime().');
-            return false;
         }
 
-        $this->days = $days;
-        $this->target_statuses = $target_statuses;
-        $this->new_status = $new_status;
-        $this->limit = $limit;
-        $this->frequency = $frequency;
-        $this->start = $start;
-
-        return true;
+        if (!$start || $start < 0) {
+            $this->throw_error('The start must be a valid timestamp or a string that can be parsed by strtotime().');
+            return null;
+        }
+        return $start;
     }
 
     /**
@@ -352,7 +425,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * @param string $message The message to include in the error.
      * @param bool $clear_events Whether or not to clear the scheduled event.
      */
-    private function throw_error($message, $clear_events = true)
+    protected function throw_error($message, $clear_events = true)
     {
         if ($this->hide_errors) {
             return;
@@ -385,7 +458,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * @param string $message The message to include in the exception.
      * @param string $exception_class The class of the exception to throw.
      */
-    private function throw_exception($message, $exception_class = 'Exception')
+    protected function throw_exception($message, $exception_class = 'Exception')
     {
         if ($this->block_exceptions) {
             return;
