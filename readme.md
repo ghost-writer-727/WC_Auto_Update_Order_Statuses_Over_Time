@@ -2,13 +2,14 @@
 
 ## Description
 
-This PHP class is designed to automatically update WooCommerce order statuses that are over a certain number of days old. By default, it cancels pending orders after 90 days.
+This PHP class is designed to automatically update WooCommerce order statuses that have gone a certain number of days since being updated. By default, it cancels pending orders after 90 days.
 
 ## Features
 
-- Automatically updates order statuses based on a set number of days.
+- Automatically updates order statuses based on a set number of days since update.
 - Allows customization of target statuses, new status, and limit.
 - Provides error handling and logging.
+- Provides *wc_auto_update_order_statuses_over_time* action hook at time of update for third-party integration.
 
 ## Requirements
 
