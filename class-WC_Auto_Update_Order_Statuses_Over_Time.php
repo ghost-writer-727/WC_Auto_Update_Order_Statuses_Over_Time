@@ -1,10 +1,11 @@
 <?php
+
 class WC_Auto_Update_Order_Statuses_Over_Time
 {
     /**
      * @var string The name of the scheduled event.
      */
-    const EVENT_HOOK = 'wc_auto_update_order_statuses_over_time';
+    const EVENT_HOOK = 'wc_auosot_update_orders';
 
     /**
      * @var int The maximum number of orders to update per batch.
@@ -24,7 +25,6 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * Default is 'pending'.
      */
     private $target_statuses;
-
 
     /**
      * @var string The status to update the order to.
@@ -105,7 +105,6 @@ class WC_Auto_Update_Order_Statuses_Over_Time
             'hide_notices' => false,
             'block_exceptions' => false,
         );
-
         $args = wp_parse_args($args, $defaults);
 
         if (!$this->validate_settings($args)) {
@@ -140,11 +139,11 @@ class WC_Auto_Update_Order_Statuses_Over_Time
             return null;
         }
 
-        // Create a lock file to prevent multiple instances of the event from running at the same time.
-        $lockFile = fopen(__DIR__ . '/' . __CLASS__ . '.lock', 'w');
+        // Prevent multiple instances from running at the same time.
+        $lock_transient_name = self::EVENT_HOOK . '_lock';
 
-        if (flock($lockFile, LOCK_EX | LOCK_NB)) {  // try to acquire an exclusive lock, non-blocking
-
+        if (!get_transient($lock_transient_name)) {  // try to acquire an exclusive lock, non-blocking
+            set_transient($lock_transient_name, true, (int) ini_get('max_execution_time') ?: 180);
             try {
                 // Get the current date and time.
                 $current_date = new DateTime();
@@ -152,25 +151,19 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 // Calculate the date $this->days days ago.
                 $days_ago = $current_date->modify("-{$this->days} days")->format('Y-m-d H:i:s');
 
+                $use_batch_limit = $this->limit === -1 || $this->limit > self::BATCH_LIMIT;
+
                 // Query for orders with target statuses.
                 $orders = wc_get_orders(array(
                     'status' => $this->target_statuses,
-                    'limit' => $this->limit === -1 || $this->limit > self::BATCH_LIMIT ? self::BATCH_LIMIT : $this->limit,
+                    'limit' => $use_batch_limit ? self::BATCH_LIMIT : $this->limit,
                     'date_modified' => '<' . $days_ago, // Only select orders modified more than $this->days days ago or more.
                 ));
-
-                // If we hit the limit and there may be more orders left, so run again.
-                if (($this->limit === -1 || $this->limit > self::BATCH_LIMIT) && count($orders) === self::BATCH_LIMIT) {
-                    // Make sure the next batch doesn't overlap with any scheduled events.
-                    $next_event_timestamp = wp_next_scheduled(self::EVENT_HOOK);
-                    $expiration = $next_event_timestamp - time() - 10; // 10 seconds buffer
-                    set_transient(self::EVENT_HOOK, true, $expiration);
-                }
 
                 // Loop through each order and update its status.
                 foreach ($orders as $order) {
                     $previous_status = $order->get_status();
-                    $order->update_status($this->new_status, "Order status updated to {$this->new_status} after being in {$previous_status} status for {$this->days} days.");
+                    $order->update_status($this->new_status, "Order status updated due to {$this->days} days inactivity.");
 
                     /** 
                      * Trigger an action after the order status is updated.
@@ -182,15 +175,21 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                      */
                     do_action('wc_auto_update_order_statuses_over_time', $order, $previous_status, $this->new_status, $this->days);
                 }
-            } catch (Exception $e) {
-                $this->throw_exception($e->getMessage(), get_class($e));
-            }
+                delete_transient($lock_transient_name);
 
-            flock($lockFile, LOCK_UN);  // release the lock
-            fclose($lockFile);
-        } else {
-            fclose($lockFile);
-            return null;
+                // If we hit the limit and there may be more orders left, so run again.
+                if ($use_batch_limit && count($orders) === self::BATCH_LIMIT) {
+                    // Make sure the next batch doesn't overlap with any scheduled events.
+                    $next_event_timestamp = wp_next_scheduled(self::EVENT_HOOK);
+                    $expiration = $next_event_timestamp - time() - 10; // 10 seconds buffer
+                    // Set a transient to trigger the next batch.
+                    set_transient(self::EVENT_HOOK, true, $expiration);
+                }
+            } catch (Exception $e) {
+                delete_transient($lock_transient_name);
+                $this->throw_exception($e->getMessage(), get_class($e));
+                return null;
+            }
         }
     }
 
@@ -264,17 +263,16 @@ class WC_Auto_Update_Order_Statuses_Over_Time
             case 'limit':
             case 'frequency':
             case 'start':
+            case 'hide_notices':
+            case 'block_exceptions':
                 if ($this->validate_settings([$name => $value])) {
                     return $this->{$name};
                 }
                 break;
-            case 'hide_notices':
-            case 'block_exceptions':
-                if (is_bool($value)) {
-                    return $this->{$name} = $value;
-                }
-                $this->throw_notice('The ' . $name . ' property must be a boolean.', false);
-                break;
+        }
+
+        if (in_array($name, ['start', 'frequency'])) {
+            $this->update_events();
         }
 
         $this->throw_exception('Invalid value "' . $value . '" provided for property "' . $name . '".', 'InvalidArgumentException');
@@ -306,10 +304,6 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 $this->{$name} = $valid_value;
             } else {
                 $invalid_settings[] = $name;
-            }
-
-            if (in_array($name, ['frequency', 'start'])) {
-                $this->update_events();
             }
         }
 
@@ -461,6 +455,24 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         return $start;
     }
 
+    protected function validate_hide_notices($hide_notices)
+    {
+        if (!is_bool($hide_notices)) {
+            $this->throw_notice('The hide_notices property must be a boolean.');
+            return null;
+        }
+        return $hide_notices;
+    }
+
+    protected function validate_block_exceptions($block_exceptions)
+    {
+        if (!is_bool($block_exceptions)) {
+            $this->throw_notice('The block_exceptions property must be a boolean.');
+            return null;
+        }
+        return $block_exceptions;
+    }
+
     /**
      * Trigger a WordPress error.
      * 
@@ -479,7 +491,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
             $message .= ' The scheduled event "' . self::EVENT_HOOK . '" has been cleared.';
         }
 
-        if (WP_DEBUG_LOG) {
+        if (WP_DEBUG) {
             error_log($message);
         }
         switch (wp_get_environment_type()) {
