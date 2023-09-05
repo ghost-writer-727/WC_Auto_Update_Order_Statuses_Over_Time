@@ -84,6 +84,8 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * • @param int $limit The number of orders to update per event.
      * • @param string $frequency The frequency with which to run the event.
      * • @param int|string $start The time to start the event. Can be a Unix timestamp or a string that can be parsed by strtotime().
+     * • @param bool $hide_notices Whether or not to hide notices.
+     * • @param bool $block_exceptions Whether or not to block exceptions.
      */
     public function __construct($args = [])
     {

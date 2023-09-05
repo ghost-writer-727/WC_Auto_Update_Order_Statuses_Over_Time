@@ -53,10 +53,17 @@ $auto_update->clear_events();
 ```
 
 ### Constructor Parameters
-- `$days`: The number of days after which an order should be updated. Default is 90.
-- `$target_statuses`: An array of order statuses that should be updated. Default is `['pending']`.
-- `$new_status`: The status to update the order to. Default is `'cancelled'`.
-- `$limit`: The number of orders to update per event. Default is `-1` (no limit).
+
+The constructor accepts an associative array `$args` with the following optional keys:
+
+- **`days`**: *(int)* The number of days after which an order should be updated. Default is `90`.
+- **`target_statuses`**: *(array)* An array of order statuses that should be updated. Default is `['pending']`.
+- **`new_status`**: *(string)* The status to update the order to. Default is `'cancelled'`.
+- **`limit`**: *(int)* The number of orders to update per event. Default is `-1` (no limit).
+- **`frequency`**: *(string)* The frequency with which to run the event. Default is `'daily'`.
+- **`start`**: *(int|string)* The time to start the event. Can be a Unix timestamp or a string that can be parsed by `strtotime()`. Default is the current time.
+- **`hide_notices`**: *(bool)* Whether or not to hide notices. Default is `false`.
+- **`block_exceptions`**: *(bool)* Whether or not to block exceptions. Default is `false`.
 
 ## Special Considerations
 
