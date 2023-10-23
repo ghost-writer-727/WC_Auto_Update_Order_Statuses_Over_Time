@@ -20,6 +20,21 @@ class WC_Auto_Update_Order_Statuses_Over_Time
     private int $days;
 
     /**
+     * @var string From what event should we start counting days? 
+     * 
+     * Set in constructor. Can be set directly.
+     * Default is 'date_modified'. See DATE_TYPES for all valid values.
+     */
+    private string $since;
+
+    const DATE_TYPES = [
+        'date_modified', 
+        'date_created', 
+        'date_completed', 
+        'date_paid'
+    ];
+
+    /**
      * @var array The order statuses that should be updated.
      * Set in constructor. Can be set directly.
      * Default is 'pending'.
@@ -79,6 +94,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * 
      * @param array $args The settings for the class:
      * • @param int $days The number of days after which an order should be updated.
+     * • @param string $since The date event to compare the number of days.
      * • @param array $target_statuses The order statuses that should be updated.
      * • @param string $new_status The status to update the order to.
      * • @param int $limit The number of orders to update per event.
@@ -123,6 +139,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      */
     private function init($args){
         $this->days = 90;
+        $this->since = self::DATE_TYPES[0];
         $this->target_statuses = ['pending'];
         $this->new_status = 'cancelled';
         $this->limit = -1;
@@ -171,13 +188,13 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 $orders = wc_get_orders(array(
                     'status' => $this->target_statuses,
                     'limit' => $use_batch_limit ? self::BATCH_LIMIT : $this->limit,
-                    'date_modified' => '<' . $days_ago, // Only select orders modified more than $this->days days ago or more.
+                    $this->since => '<' . $days_ago,
                 ));
 
                 // Loop through each order and update its status.
                 foreach ($orders as $order) {
                     $previous_status = $order->get_status();
-                    $order->update_status($this->new_status, "Order status updated due to {$this->days} days inactivity.");
+                    $order->update_status($this->new_status, "Order status updated due to {$this->days} days since {$this->since}.");
 
                     /** 
                      * Trigger an action after the order status is updated.
@@ -239,24 +256,19 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         if ($this->invalidated) {
             return null;
         }
-        switch ($name) {
-            case 'days':
-            case 'target_statuses':
-            case 'new_status':
-            case 'limit':
-            case 'frequency':
-            case 'start':
-            case 'hide_notices':
-            case 'block_exceptions':
-            case 'invalidated':
-                return $this->{$name};
-            case 'event_hook':
-                return $this->event_hook;
-            case 'batch_limit':
-                return self::BATCH_LIMIT;
-            default:
-                return null;
+    
+        if (property_exists($this, $name)) {
+            return $this->{$name};
         }
+    
+        $constName = get_class($this) . '::' . $name;
+        if (defined($constName)) {
+            return constant($constName);
+        }
+    
+        $this->throw_exception("Property \"{$name}\" does not exist.", 'InvalidArgumentException');
+        
+        return null;
     }
 
     /**
@@ -266,32 +278,30 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * @param mixed $value The value to set the property to.
      */
     public function __set($name, $value)
-    {
-        if ($this->invalidated) {
-            return null;
-        }
-        switch ($name) {
-            case 'days':
-            case 'target_statuses':
-            case 'new_status':
-            case 'limit':
-            case 'frequency':
-            case 'start':
-            case 'hide_notices':
-            case 'block_exceptions':
-                if ($this->validate_settings([$name => $value])) {
-                    return $this->{$name};
-                }
-                break;
-        }
-
-        if (in_array($name, ['start', 'frequency'])) {
-            $this->update_events();
-        }
-
-        $this->throw_exception('Invalid value "' . $value . '" provided for property "' . $name . '".', 'InvalidArgumentException');
+{
+    if ($this->invalidated) {
         return null;
     }
+
+    if (property_exists($this, $name)) {
+        if ($this->validate_settings([$name => $value])) {
+
+            if (in_array($name, ['start', 'frequency'])) {
+                $this->update_events();
+            }
+
+            return $this->{$name};
+        }
+    }
+
+    $this->throw_exception(
+        "Invalid value \"{$value}\" provided for property \"{$name}\".",
+        'InvalidArgumentException'
+    );
+
+    return null;
+}
+
 
     /**
      * Validate all settings
@@ -355,6 +365,29 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         }
 
         return $days;
+    }
+
+    /**
+     * Validate the trigger type setting.
+     * 
+     * @param string $since The event that should trigger the countdown.
+     * @return string|null The event that should trigger the countdown, or null if the setting is invalid.
+     */
+    protected function validate_since($since)
+    {
+        // Trigger a WordPress error if the trigger type is not a string.
+        if (!is_string($since)) {
+            $this->throw_notice('The trigger type must be a string.');
+            return null;
+        }
+
+        // Trigger a WordPress error if the trigger type is not a valid trigger type.
+        if (!in_array($since, self::DATE_TYPES)) {
+            $this->throw_notice('The trigger type must be one of the following: ' . implode(', ', self::DATE_TYPES));
+            return null;
+        }
+
+        return $since;
     }
 
     /**
