@@ -17,62 +17,62 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * Set in constructor. Can be set directly.
      * Default is 90.
      */
-    private $days;
+    private int $days;
 
     /**
-     * @var array|string The order statuses that should be updated.
+     * @var array The order statuses that should be updated.
      * Set in constructor. Can be set directly.
      * Default is 'pending'.
      */
-    private $target_statuses;
+    private array $target_statuses;
 
     /**
      * @var string The status to update the order to.
      * Set in constructor. Can be set directly.
      * Default is 'cancelled'.
      */
-    private $new_status;
+    private string $new_status;
 
     /**
      * @var int The number of orders to update per event.
      * Set in constructor. Can be set directly.
      * Default is -1, which means all orders will be updated.
      */
-    private $limit;
+    private int $limit;
 
     /**
      * @var string The frequency with which to run the event.
      * Set in constructor. Can be set directly.
      * Default is 'daily'.
      */
-    private $frequency;
+    private string $frequency;
 
     /**
      * @var int The time to start the event.
      * Set in constructor. Can be set directly.
      * Default is time().
      */
-    private $start;
+    private int $start;
 
     /**
      * @var bool Whether or not to hide notices.
      * Can be set directly.
      * Default is false.
      */
-    private $hide_notices;
+    private bool $hide_notices;
 
     /**
      * @var bool Whether or not to block exceptions.
      * Can be set directly.
      * Default is false.
      */
-    private $block_exceptions;
+    private bool $block_exceptions;
 
     /**
      * @var bool Whether or not the class has been invalidated.
      * Used to prevent the class from running if the settings are invalid upon instantiation while blocking exceptions.
      */
-    private $invalidated;
+    private bool $invalidated;
 
     /**
      * Initialize the class and set hooks.
