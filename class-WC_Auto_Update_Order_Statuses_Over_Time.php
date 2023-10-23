@@ -89,39 +89,14 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      */
     public function __construct($args = [])
     {
-        // Check if WooCommerce is active
-        $active_plugins = (array) get_option('active_plugins', []);
-        if (!in_array('woocommerce/woocommerce.php', $active_plugins)) {
-            $this->throw_notice('WooCommerce must to be activated first to use ' . __CLASS__ . '.');
-            $this->invalidated = true;
-            return;
-        }
-
-        $defaults = array(
-            'days' => 90,
-            'target_statuses' => ['pending'],
-            'new_status' => 'cancelled',
-            'limit' => -1,
-            'frequency' => 'daily',
-            'start' => time(),
-            'hide_notices' => false,
-            'block_exceptions' => false,
-        );
-        $args = wp_parse_args($args, $defaults);
-
-        if (!$this->validate_settings($args)) {
-            $this->throw_exception('Invalid settings provided. Check the WordPress error log for details.', 'InvalidArgumentException');
-
-            // If exceptions are hidden, invalidate the class so that it doesn't run.
-            $this->invalidated = true;
-            return;
-        }
-
+        $this->check_dependencies();
+        $this->init($args);       
+        
         // Schedule the event if it's not already scheduled.
         if (!wp_next_scheduled(self::EVENT_HOOK)) {
             wp_schedule_event($this->start, $this->frequency, self::EVENT_HOOK);
         }
-
+        
         // Check if transient exists, in case we are already processing an event that was batched out.
         if (get_transient(self::EVENT_HOOK)) {
             delete_transient(self::EVENT_HOOK);
@@ -129,6 +104,42 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         } else {
             // Hook into the scheduled event.
             add_action(self::EVENT_HOOK, array($this, 'update_orders'));
+        }
+    }
+    
+    private function check_dependencies(){
+        // Check if WooCommerce is active
+        $active_plugins = (array) get_option('active_plugins', []);
+        if (!in_array('woocommerce/woocommerce.php', $active_plugins)) {
+            $this->throw_notice('WooCommerce must to be activated first to use ' . __CLASS__ . '.');
+            $this->invalidated = true;
+            return;
+        }        
+    }
+    
+    /**
+     * Initialize the class.
+     */
+    private function init($args){
+        $this->days = 90;
+        $this->target_statuses = ['pending'];
+        $this->new_status = 'cancelled';
+        $this->limit = -1;
+        $this->frequency = 'daily';
+        $this->start = time();
+        $this->hide_notices = false;
+        $this->block_exceptions = false;
+        $this->invalidated = false;
+
+        // Validate the settings and override default property values.
+        $settings_validated = $this->validate_settings($args);
+
+        if (!$settings_validated) {
+            $this->throw_exception('Invalid settings provided. Check the WordPress error log for details.', 'InvalidArgumentException');
+    
+            // If exceptions are hidden, invalidate the class so that it doesn't run.
+            $this->invalidated = true;
+            return;
         }
     }
 
@@ -301,14 +312,21 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 continue;
             }
 
-            $valid_value = $this->$method_name($value);
-            if ($valid_value !== null) {
-                $this->{$name} = $valid_value;
+            // Process the value through the validation method.
+            $maybe_validated_value = $this->$method_name($value);
+
+            // Ensure that we have returned a proper type.
+            // Will be NULL if the setting is invalid.
+            if ( gettype($maybe_validated_value) === gettype($this->{$name}) ) {
+                // Set the property
+                $this->{$name} = $maybe_validated_value;
             } else {
+                // The setting is invalid.
                 $invalid_settings[] = $name;
             }
         }
 
+        // If there are no invalid settings, return true.
         return empty($invalid_settings);
     }
 
@@ -316,19 +334,23 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * Validate the days setting.
      * 
      * @param int|string $days The number of days after which an order should be updated.
+     * 
      * @return int|null The number of days after which an order should be updated, or null if the setting is invalid.
+     * @throws InvalidArgumentException If the days setting is invalid.
      */
     protected function validate_days($days)
     {
         // Force the days to be an integer.
         if (!is_numeric($days)) {
-            $this->throw_notice('The days must be numeric.');
+            $this->throw_notice('The days must be an integer.');
             return null;
         }
 
         $days = intval($days);
+
         if ($days < 1) {
-            return null;
+            $this->throw_notice('The days must be greater than or equal to 1.');
+            $days = null;
         }
 
         return $days;
