@@ -3,19 +3,14 @@
 class WC_Auto_Update_Order_Statuses_Over_Time
 {
     /**
-     * @var string The name of the scheduled event.
-     */
-    const EVENT_HOOK = 'wc_auosot_update_orders';
-
-    /**
      * @var int The maximum number of orders to update per batch.
      */
     const BATCH_LIMIT = 50;
 
     /**
-     * $var string The name of this instance of the class.
+     * $var string Unique identifier for events and transients pertaining to this instance of the class.
      */
-    private string $slug;
+    private string $event_hook;
 
     /**
      * @var int The number of days without updates after which an order should be updated.
@@ -92,24 +87,24 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * • @param bool $hide_notices Whether or not to hide notices.
      * • @param bool $block_exceptions Whether or not to block exceptions.
      */
-    public function __construct($slug, $args = [])
+    public function __construct(string $slug, array $args = [])
     {
         $this->check_dependencies();
-        $this->slug = self::EVENT_HOOK . '_' . $slug;
+        $this->event_hook = "wc_auosot_update_orders_{$slug}";
         $this->init($args);
         
         // Schedule the event if it's not already scheduled.
-        if (!wp_next_scheduled($this->slug)) {
-            wp_schedule_event($this->start, $this->frequency, $this->slug);
+        if (!wp_next_scheduled($this->event_hook)) {
+            wp_schedule_event($this->start, $this->frequency, $this->event_hook);
         }
         
         // Check if transient exists, in case we are already processing an event that was batched out.
-        if (get_transient($this->slug)) {
-            delete_transient($this->slug);
+        if (get_transient($this->event_hook)) {
+            delete_transient($this->event_hook);
             $this->update_orders();
         } else {
             // Hook into the scheduled event.
-            add_action($this->slug, array($this, 'update_orders'));
+            add_action($this->event_hook, array($this, 'update_orders'));
         }
     }
     
@@ -159,7 +154,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         }
 
         // Prevent multiple instances from running at the same time.
-        $lock_transient_name = $this->slug . '_lock';
+        $lock_transient_name = $this->event_hook . '_lock';
 
         if (!get_transient($lock_transient_name)) {  // try to acquire an exclusive lock, non-blocking
             set_transient($lock_transient_name, true, (int) ini_get('max_execution_time') ?: 180);
@@ -199,10 +194,10 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 // If we hit the limit and there may be more orders left, so run again.
                 if ($use_batch_limit && count($orders) === self::BATCH_LIMIT) {
                     // Make sure the next batch doesn't overlap with any scheduled events.
-                    $next_event_timestamp = wp_next_scheduled($this->slug);
+                    $next_event_timestamp = wp_next_scheduled($this->event_hook);
                     $expiration = $next_event_timestamp - time() - 10; // 10 seconds buffer
                     // Set a transient to trigger the next batch.
-                    set_transient($this->slug, true, $expiration);
+                    set_transient($this->event_hook, true, $expiration);
                 }
             } catch (Exception $e) {
                 delete_transient($lock_transient_name);
@@ -220,8 +215,8 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         if ($this->invalidated) {
             return null;
         }
-        delete_transient($this->slug);
-        wp_clear_scheduled_hook($this->slug);
+        delete_transient($this->event_hook);
+        wp_clear_scheduled_hook($this->event_hook);
     }
 
     /**
@@ -230,7 +225,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
     private function update_events()
     {
         $this->clear_events();
-        wp_schedule_event($this->start, $this->frequency, $this->slug);
+        wp_schedule_event($this->start, $this->frequency, $this->event_hook);
     }
 
     /**
@@ -256,7 +251,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
             case 'invalidated':
                 return $this->{$name};
             case 'event_hook':
-                return $this->slug;
+                return $this->event_hook;
             case 'batch_limit':
                 return self::BATCH_LIMIT;
             default:
@@ -518,7 +513,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         $message = __CLASS__ . ': ' . $message;
         if ($clear_events) {
             $this->clear_events();
-            $message .= ' The scheduled event "' . $this->slug . '" has been cleared.';
+            $message .= ' The scheduled event "' . $this->event_hook . '" has been cleared.';
         }
 
         if (WP_DEBUG) {

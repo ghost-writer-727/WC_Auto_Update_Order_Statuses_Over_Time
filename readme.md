@@ -9,7 +9,7 @@ This PHP class is designed to automatically update WooCommerce order statuses th
 - Automatically updates order statuses based on a set number of days since update.
 - Allows customization of target statuses, new status, and limit.
 - Provides error handling and logging.
-- Provides *wc_auto_update_order_statuses_over_time* action hook at time of update for third-party integration.
+- Provides *wc_auto_update_order_statuses_over_time_{$slug}* action hook at time of update for third-party integration.
 
 ## Requirements
 
