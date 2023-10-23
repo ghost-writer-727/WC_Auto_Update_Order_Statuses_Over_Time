@@ -33,11 +33,11 @@ Here's a basic example of how to use the class:
 
 ```php
 // Initialize the class with custom settings
-$auto_update = new WC_Auto_Update_Order_Statuses_Over_Time([
+$auto_update = new WC_Auto_Update_Order_Statuses_Over_Time('my_plugin', [
     'target_statuses' => ['pending','awaiting-payment'],
     'start' => 'midnight +1 day', // Tonight at midnight
     'limit' => 10
-]);
+] );
 
 // Access properties
 $days = $auto_update->days;
@@ -54,7 +54,7 @@ $auto_update->clear_events();
 
 ### Constructor Parameters
 
-The constructor accepts an associative array `$args` with the following optional keys:
+The constructor accepts a string `$slug` to allow independent operation of mulitple instances as well as an associative array `$args` with the following optional keys:
 
 - **`days`**: *(int)* The number of days after which an order should be updated. Default is `90`.
 - **`target_statuses`**: *(array)* An array of order statuses that should be updated. Default is `['pending']`.
@@ -78,7 +78,7 @@ This class has unique features that allow you to control how errors and exceptio
 - `hide_errors`: If set to `true`, WordPress errors will be suppressed.
 - `block_exceptions`: If set to `true`, exceptions will be suppressed.
 
-Even if errors and exceptions are hidden, the class will be invalidated, preventing further actions until the issues are resolved. This is controlled by the `invalidated` property, which will be set to `true` if any invalid settings are detected.
+Even if errors and exceptions are hidden, the class can be invalidated, preventing further actions until the issues are resolved. This is controlled by the `invalidated` property, which will be set to `true` if any invalid settings are detected.
 
 ## Contributing
 
