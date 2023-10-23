@@ -13,6 +13,11 @@ class WC_Auto_Update_Order_Statuses_Over_Time
     const BATCH_LIMIT = 50;
 
     /**
+     * $var string The name of this instance of the class.
+     */
+    private string $slug;
+
+    /**
      * @var int The number of days without updates after which an order should be updated.
      * Set in constructor. Can be set directly.
      * Default is 90.
@@ -87,23 +92,24 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * • @param bool $hide_notices Whether or not to hide notices.
      * • @param bool $block_exceptions Whether or not to block exceptions.
      */
-    public function __construct($args = [])
+    public function __construct($slug, $args = [])
     {
         $this->check_dependencies();
-        $this->init($args);       
+        $this->slug = self::EVENT_HOOK . '_' . $slug;
+        $this->init($args);
         
         // Schedule the event if it's not already scheduled.
-        if (!wp_next_scheduled(self::EVENT_HOOK)) {
-            wp_schedule_event($this->start, $this->frequency, self::EVENT_HOOK);
+        if (!wp_next_scheduled($this->slug)) {
+            wp_schedule_event($this->start, $this->frequency, $this->slug);
         }
         
         // Check if transient exists, in case we are already processing an event that was batched out.
-        if (get_transient(self::EVENT_HOOK)) {
-            delete_transient(self::EVENT_HOOK);
+        if (get_transient($this->slug)) {
+            delete_transient($this->slug);
             $this->update_orders();
         } else {
             // Hook into the scheduled event.
-            add_action(self::EVENT_HOOK, array($this, 'update_orders'));
+            add_action($this->slug, array($this, 'update_orders'));
         }
     }
     
@@ -153,7 +159,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         }
 
         // Prevent multiple instances from running at the same time.
-        $lock_transient_name = self::EVENT_HOOK . '_lock';
+        $lock_transient_name = $this->slug . '_lock';
 
         if (!get_transient($lock_transient_name)) {  // try to acquire an exclusive lock, non-blocking
             set_transient($lock_transient_name, true, (int) ini_get('max_execution_time') ?: 180);
@@ -193,10 +199,10 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 // If we hit the limit and there may be more orders left, so run again.
                 if ($use_batch_limit && count($orders) === self::BATCH_LIMIT) {
                     // Make sure the next batch doesn't overlap with any scheduled events.
-                    $next_event_timestamp = wp_next_scheduled(self::EVENT_HOOK);
+                    $next_event_timestamp = wp_next_scheduled($this->slug);
                     $expiration = $next_event_timestamp - time() - 10; // 10 seconds buffer
                     // Set a transient to trigger the next batch.
-                    set_transient(self::EVENT_HOOK, true, $expiration);
+                    set_transient($this->slug, true, $expiration);
                 }
             } catch (Exception $e) {
                 delete_transient($lock_transient_name);
@@ -214,8 +220,8 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         if ($this->invalidated) {
             return null;
         }
-        delete_transient(self::EVENT_HOOK);
-        wp_clear_scheduled_hook(self::EVENT_HOOK);
+        delete_transient($this->slug);
+        wp_clear_scheduled_hook($this->slug);
     }
 
     /**
@@ -224,7 +230,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
     private function update_events()
     {
         $this->clear_events();
-        wp_schedule_event($this->start, $this->frequency, self::EVENT_HOOK);
+        wp_schedule_event($this->start, $this->frequency, $this->slug);
     }
 
     /**
@@ -250,7 +256,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
             case 'invalidated':
                 return $this->{$name};
             case 'event_hook':
-                return self::EVENT_HOOK;
+                return $this->slug;
             case 'batch_limit':
                 return self::BATCH_LIMIT;
             default:
@@ -512,7 +518,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         $message = __CLASS__ . ': ' . $message;
         if ($clear_events) {
             $this->clear_events();
-            $message .= ' The scheduled event "' . self::EVENT_HOOK . '" has been cleared.';
+            $message .= ' The scheduled event "' . $this->slug . '" has been cleared.';
         }
 
         if (WP_DEBUG) {
