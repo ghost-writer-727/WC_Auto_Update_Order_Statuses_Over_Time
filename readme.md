@@ -2,11 +2,11 @@
 
 ## Description
 
-This PHP class is designed to automatically update WooCommerce order statuses that have gone a certain number of days since being updated. By default, it cancels pending orders after 90 days.
+This PHP class is designed to automatically update WooCommerce order statuses that have gone a certain number of days since a WooCommerce timestamped event. By default, it cancels pending orders after 90 days.
 
 ## Features
 
-- Automatically updates order statuses based on a set number of days since update.
+- Automatically updates order statuses based on a set number of days since select WooCommerce events.
 - Allows customization of target statuses, new status, and limit.
 - Provides error handling and logging.
 - Provides *wc_auto_update_order_statuses_over_time_{$slug}* action hook at time of update for third-party integration.
@@ -57,6 +57,7 @@ $auto_update->clear_events();
 The constructor accepts a string `$slug` to allow independent operation of mulitple instances as well as an associative array `$args` with the following optional keys:
 
 - **`days`**: *(int)* The number of days after which an order should be updated. Default is `90`.
+- **`since`**: *(string)* The WooCommerce field to compare days. Can be `'date_modified'`, `'date_created'`, `'date_completed'` or `'date_paid'`. Default is `'date_modified'`.
 - **`target_statuses`**: *(array)* An array of order statuses that should be updated. Default is `['pending']`.
 - **`new_status`**: *(string)* The status to update the order to. Default is `'cancelled'`.
 - **`limit`**: *(int)* The number of orders to update per event. Default is `-1` (no limit).
