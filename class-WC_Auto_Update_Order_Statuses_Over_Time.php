@@ -3,6 +3,11 @@
 class WC_Auto_Update_Order_Statuses_Over_Time
 {
     /**
+     * @var string The slug for the event hook and transients.
+     */
+    private string $slug;
+
+    /**
      * $var string Unique identifier for events and transients pertaining to this instance of the class.
      */
     private string $event_hook;
