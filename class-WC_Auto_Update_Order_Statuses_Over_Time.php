@@ -187,8 +187,22 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 // Loop through each order and update its status.
                 foreach ($orders as $order) {
                     $previous_status = $order->get_status();
-                    $order->update_status($this->new_status, "Order status updated due to {$this->days} days since {$this->since}.");
 
+                    /** 
+                     * Allow short circuit.
+                     * 
+                     * @param bool Whether or not to interrupt the order status update.
+                     * @param WC_Order $order The order that was updated.
+                     * @param string $previous_status The previous status of the order.
+                     * @param string $new_status The new status of the order.
+                     * @param int $days The minimum number of days since the order was previously updated. This represents the settings at the time this was triggered... not the actual number of days since the order was previously updated.
+                     */
+                    if( apply_filters("wc_auosot_interrupt_{$this->slug}", false, $order, $previous_status, $this->new_status, $this->days) ){
+                        continue;
+                    }
+                    
+                    $order->update_status($this->new_status, "Order status updated due to {$this->days} days since {$this->since}.");
+                    
                     /** 
                      * Trigger an action after the order status is updated.
                      * 
@@ -197,7 +211,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                      * @param string $new_status The new status of the order.
                      * @param int $days The minimum number of days since the order was previously updated. This represents the settings at the time this was triggered... not the actual number of days since the order was previously updated.
                      */
-                    do_action('wc_auto_update_order_statuses_over_time', $order, $previous_status, $this->new_status, $this->days);
+                    do_action("wc_auosot_updated_{$this->slug}", $order, $previous_status, $this->new_status, $this->days);
                 }
                 delete_transient($lock_transient_name);
 
