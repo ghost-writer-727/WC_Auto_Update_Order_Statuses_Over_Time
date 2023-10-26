@@ -137,7 +137,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         $this->since = self::DATE_TYPES[0];
         $this->target_statuses = ['pending'];
         $this->new_status = 'cancelled';
-        $this->limit = -1;
+        $this->limit = 50;
         $this->frequency = 'daily';
         $this->start = time();
         $this->hide_notices = false;
@@ -460,8 +460,8 @@ class WC_Auto_Update_Order_Statuses_Over_Time
             return null;
         }
         $limit = intval($limit);
-        if ($limit < -1) {
-            $this->throw_notice('The limit must be greater than or equal to -1.');
+        if (!$limit || $limit < -1 ) {
+            $this->throw_notice('The limit must be -1 (no limit) or greater than 1.');
             return null;
         }
         return $limit;

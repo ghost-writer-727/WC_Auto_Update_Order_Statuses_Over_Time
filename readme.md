@@ -60,7 +60,7 @@ The constructor accepts a string `$slug` to allow independent operation of mulit
 - **`since`**: *(string)* The WooCommerce field to compare days. Can be `'date_modified'`, `'date_created'`, `'date_completed'` or `'date_paid'`. Default is `'date_modified'`.
 - **`target_statuses`**: *(array)* An array of order statuses that should be updated. Default is `['pending']`.
 - **`new_status`**: *(string)* The status to update the order to. Default is `'cancelled'`.
-- **`limit`**: *(int)* The number of orders to update per event. Default is `-1` (no limit).
+- **`limit`**: *(int)* The number of orders to update per page load. If the limit lower than the number of affected orders, a transient will prompt the method to run again on each page load until all affected orders are updated. Must be set to `-1` (no limit) or greater than `1`. Default is `50` to prevent timeouts.
 - **`frequency`**: *(string)* The frequency with which to run the event. Default is `'daily'`.
 - **`start`**: *(int|string)* The time to start the event. Can be a Unix timestamp or a string that can be parsed by `strtotime()`. Default is the current time.
 - **`hide_notices`**: *(bool)* Whether or not to hide notices. Default is `false`.
