@@ -198,6 +198,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                      * @param int $days The minimum number of days since the order was previously updated. This represents the settings at the time this was triggered... not the actual number of days since the order was previously updated.
                      */
                     if( apply_filters("wc_auosot_interrupt_{$this->slug}", false, $order, $previous_status, $this->new_status, $this->days) ){
+                        $this->throw_notice("wc_auosot_interrupt_{$this->slug} filter interrupted order {$order->get_id()} status update from {$previous_status} to {$this->new_status}.");
                         continue;
                     }
                     
