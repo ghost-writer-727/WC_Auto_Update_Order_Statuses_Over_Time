@@ -105,6 +105,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      */
     public function __construct(string $slug, array $args = [])
     {
+        $this->slug = $slug;
         $this->check_dependencies();
         $this->event_hook = "wc_auosot_update_orders_{$slug}";
         $this->init($args);
