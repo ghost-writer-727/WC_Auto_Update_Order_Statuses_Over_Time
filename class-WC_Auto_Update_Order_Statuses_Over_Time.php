@@ -181,7 +181,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 $orders = wc_get_orders(array(
                     'status' => $this->target_statuses,
                     'limit' => $this->limit,
-                    $this->since => '<==' . $days_ago,
+                    $this->since => '<=' . $days_ago,
                 ));
 
                 // Loop through each order and update its status.
