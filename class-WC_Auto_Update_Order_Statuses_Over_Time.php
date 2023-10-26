@@ -161,7 +161,6 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      */
     public function update_orders()
     {
-        dap( 'update_orders');
         if ($this->invalidated) {
             return null;
         }
@@ -178,13 +177,11 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 // Calculate the date $this->days days ago.
                 $days_ago = $current_date->modify("-{$this->days} days")->format('Y-m-d 00:00:00');
 
-                dap( $days_ago, 'days_ago');
-
                 // Query for orders with target statuses.
                 $orders = wc_get_orders(array(
                     'status' => $this->target_statuses,
                     'limit' => $this->limit,
-                    $this->since => '<=' . $days_ago,
+                    $this->since => '<==' . $days_ago,
                 ));
 
                 // Loop through each order and update its status.
@@ -201,7 +198,6 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                      * @param int $days The minimum number of days since the order was previously updated. This represents the settings at the time this was triggered... not the actual number of days since the order was previously updated.
                      */
                     do_action('wc_auto_update_order_statuses_over_time', $order, $previous_status, $this->new_status, $this->days);
-                    dap( "{$order->get_id()} updated from {$previous_status} to {$this->new_status}");
                 }
                 delete_transient($lock_transient_name);
 
