@@ -3,11 +3,6 @@
 class WC_Auto_Update_Order_Statuses_Over_Time
 {
     /**
-     * @var int The maximum number of orders to update per batch.
-     */
-    const BATCH_LIMIT = 50;
-
-    /**
      * $var string Unique identifier for events and transients pertaining to this instance of the class.
      */
     private string $event_hook;
@@ -166,6 +161,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      */
     public function update_orders()
     {
+        dap( 'update_orders');
         if ($this->invalidated) {
             return null;
         }
@@ -180,15 +176,15 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 $current_date = new DateTime();
 
                 // Calculate the date $this->days days ago.
-                $days_ago = $current_date->modify("-{$this->days} days")->format('Y-m-d H:i:s');
+                $days_ago = $current_date->modify("-{$this->days} days")->format('Y-m-d 00:00:00');
 
-                $use_batch_limit = $this->limit === -1 || $this->limit > self::BATCH_LIMIT;
+                dap( $days_ago, 'days_ago');
 
                 // Query for orders with target statuses.
                 $orders = wc_get_orders(array(
                     'status' => $this->target_statuses,
-                    'limit' => $use_batch_limit ? self::BATCH_LIMIT : $this->limit,
-                    $this->since => '<' . $days_ago,
+                    'limit' => $this->limit,
+                    $this->since => '<=' . $days_ago,
                 ));
 
                 // Loop through each order and update its status.
@@ -205,11 +201,12 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                      * @param int $days The minimum number of days since the order was previously updated. This represents the settings at the time this was triggered... not the actual number of days since the order was previously updated.
                      */
                     do_action('wc_auto_update_order_statuses_over_time', $order, $previous_status, $this->new_status, $this->days);
+                    dap( "{$order->get_id()} updated from {$previous_status} to {$this->new_status}");
                 }
                 delete_transient($lock_transient_name);
 
                 // If we hit the limit and there may be more orders left, so run again.
-                if ($use_batch_limit && count($orders) === self::BATCH_LIMIT) {
+                if ($this->limit > 0 && count($orders) === $this->limit) {
                     // Make sure the next batch doesn't overlap with any scheduled events.
                     $next_event_timestamp = wp_next_scheduled($this->event_hook);
                     $expiration = $next_event_timestamp - time() - 10; // 10 seconds buffer
