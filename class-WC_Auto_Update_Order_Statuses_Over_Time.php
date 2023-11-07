@@ -116,7 +116,6 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         
         // Check if transient exists, in case we are already processing an event that was batched out.
         if (get_transient($this->batching_transient_name)) {
-            delete_transient($this->batching_transient_name);
             $this->update_orders();
 
         // Hook into the scheduled event.
@@ -177,6 +176,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      */
     public function really_update_orders(){
         if (!get_transient($this->lock_transient_name)) {
+            delete_transient($this->batching_transient_name);
             set_transient($this->lock_transient_name, true, (int) ini_get('max_execution_time') ?: 180);
             try {
                 // Get the current date and time.
