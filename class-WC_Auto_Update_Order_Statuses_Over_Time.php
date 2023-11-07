@@ -2,15 +2,39 @@
 
 class WC_Auto_Update_Order_Statuses_Over_Time
 {
+    const DATE_TYPES = [
+        'date_modified', 
+        'date_created', 
+        'date_completed', 
+        'date_paid'
+    ];
+
+    const UNEDITABLE_PROPERTIES = [
+        'slug',
+        'event_hook',
+        'lock_transient_name',
+        'batching_transient_name',
+    ];
+
     /**
      * @var string The slug for the event hook and transients.
      */
     private string $slug;
 
     /**
-     * $var string Unique identifier for events and transients pertaining to this instance of the class.
+     * $var string Unique identifier for scheduled event pertaining to this instance of the class.
      */
     private string $event_hook;
+
+    /**
+     * $var string Unique identifier for lock transient pertaining to this instance of the class.
+     */
+    private string $lock_transient_name;
+
+    /**
+     * $var string Unique identifier for batching transient pertaining to this instance of the class.
+     */
+    private string $batching_transient_name;
 
     /**
      * @var int The number of days without updates after which an order should be updated.
@@ -26,13 +50,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * Default is 'date_modified'. See DATE_TYPES for all valid values.
      */
     private string $since;
-
-    const DATE_TYPES = [
-        'date_modified', 
-        'date_created', 
-        'date_completed', 
-        'date_paid'
-    ];
+    
 
     /**
      * @var array The order statuses that should be updated.
@@ -70,26 +88,6 @@ class WC_Auto_Update_Order_Statuses_Over_Time
     private int $start;
 
     /**
-     * @var bool Whether or not to hide notices.
-     * Can be set directly.
-     * Default is false.
-     */
-    private bool $hide_notices;
-
-    /**
-     * @var bool Whether or not to block exceptions.
-     * Can be set directly.
-     * Default is false.
-     */
-    private bool $block_exceptions;
-
-    /**
-     * @var bool Whether or not the class has been invalidated.
-     * Used to prevent the class from running if the settings are invalid upon instantiation while blocking exceptions.
-     */
-    private bool $invalidated;
-
-    /**
      * Initialize the class and set hooks.
      * 
      * @param array $args The settings for the class:
@@ -100,82 +98,80 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * • @param int $limit The number of orders to update per event.
      * • @param string $frequency The frequency with which to run the event.
      * • @param int|string $start The time to start the event. Can be a Unix timestamp or a string that can be parsed by strtotime().
-     * • @param bool $hide_notices Whether or not to hide notices.
-     * • @param bool $block_exceptions Whether or not to block exceptions.
      */
     public function __construct(string $slug, array $args = [])
     {
         $this->slug = $slug;
         $this->check_dependencies();
-        $this->event_hook = "wc_auosot_update_orders_{$slug}";
         $this->init($args);
-        
+
         // Schedule the event if it's not already scheduled.
         if (!wp_next_scheduled($this->event_hook)) {
             wp_schedule_event($this->start, $this->frequency, $this->event_hook);
         }
         
         // Check if transient exists, in case we are already processing an event that was batched out.
-        if (get_transient($this->event_hook)) {
-            delete_transient($this->event_hook);
+        if (get_transient($this->batching_transient_name)) {
+            delete_transient($this->batching_transient_name);
             $this->update_orders();
+
+        // Hook into the scheduled event.
         } else {
-            // Hook into the scheduled event.
             add_action($this->event_hook, array($this, 'update_orders'));
         }
     }
     
-    private function check_dependencies(){
+    protected function check_dependencies(){
         // Check if WooCommerce is active
         $active_plugins = (array) get_option('active_plugins', []);
         if (!in_array('woocommerce/woocommerce.php', $active_plugins)) {
             $this->throw_notice('WooCommerce must to be activated first to use ' . __CLASS__ . '.');
-            $this->invalidated = true;
             return;
         }        
     }
     
     /**
-     * Initialize the class.
+     * Initialize the class properties & args.
      */
-    private function init($args){
+    protected function init($args){
+        $this->event_hook = "wc_auosot_update_orders_{$this->slug}";
+        $this->lock_transient_name = "{$this->event_hook}_lock";
+        $this->batching_transient_name = "{$this->event_hook}_batch";
+
         $this->days = 90;
         $this->since = self::DATE_TYPES[0];
         $this->target_statuses = ['pending'];
         $this->new_status = 'cancelled';
-        $this->limit = 50;
+        $this->limit = 25;
         $this->frequency = 'daily';
         $this->start = time();
-        $this->hide_notices = false;
-        $this->block_exceptions = false;
-        $this->invalidated = false;
 
         // Validate the settings and override default property values.
-        $settings_validated = $this->validate_settings($args);
-
-        if (!$settings_validated) {
-            $this->throw_exception('Invalid settings provided. Check the WordPress error log for details.', 'InvalidArgumentException');
-    
-            // If exceptions are hidden, invalidate the class so that it doesn't run.
-            $this->invalidated = true;
+        if ( ! $this->validate_settings($args) ) {
+            $this->throw_exception('Invalid settings provided. Check the WordPress error log for details.', 'InvalidArgumentException');    
             return;
         }
     }
 
     /**
-     * Update orders with target statuses that are over a certain number of days old.
+     * Delay starting the process until after all other processes have run.
+     * Because something else was interfering with the Data Store object, 
+     * modifying our query causing it to return all orders regardless of 
+     * status as well as update statuses without the wc- prefix on batch 
+     * runs triggered via batch transient.
      */
     public function update_orders()
     {
-        if ($this->invalidated) {
-            return null;
-        }
-
-        // Prevent multiple instances from running at the same time.
-        $lock_transient_name = $this->event_hook . '_lock';
-
-        if (!get_transient($lock_transient_name)) {  // try to acquire an exclusive lock, non-blocking
-            set_transient($lock_transient_name, true, (int) ini_get('max_execution_time') ?: 180);
+        // Burying this near the end of order of operations.
+        add_action( 'shutdown', [$this, 'really_update_orders']);
+    }
+    
+    /**
+     * Update orders with target statuses that are over a certain number of days old.
+     */
+    public function really_update_orders(){
+        if (!get_transient($this->lock_transient_name)) {
+            set_transient($this->lock_transient_name, true, (int) ini_get('max_execution_time') ?: 180);
             try {
                 // Get the current date and time.
                 $current_date = new DateTime();
@@ -184,16 +180,18 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 $days_ago = $current_date->modify("-{$this->days} days")->format('Y-m-d 00:00:00');
 
                 // Query for orders with target statuses.
-                $orders = wc_get_orders(array(
+                $args = [
                     'status' => $this->target_statuses,
                     'limit' => $this->limit,
                     $this->since => '<=' . $days_ago,
-                ));
+                    'type'  => 'shop_order', // Excludes subscriptions, refunds, etc. Still returns orders that have been refunded or contain subscription, etc.
+                ];
+                $orders = wc_get_orders($args);
 
                 // Loop through each order and update its status.
                 foreach ($orders as $order) {
                     $previous_status = $order->get_status();
-
+                    
                     /** 
                      * Allow short circuit.
                      * 
@@ -204,11 +202,11 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                      * @param int $days The minimum number of days since the order was previously updated. This represents the settings at the time this was triggered... not the actual number of days since the order was previously updated.
                      */
                     if( apply_filters("wc_auosot_interrupt_{$this->slug}", false, $order, $previous_status, $this->new_status, $this->days) ){
-                        $this->throw_notice("wc_auosot_interrupt_{$this->slug} filter interrupted order {$order->get_id()} status update from {$previous_status} to {$this->new_status}.");
+                        // $this->throw_notice("wc_auosot_interrupt_{$this->slug} filter interrupted order {$order->get_id()} status update from {$previous_status} to {$this->new_status}.");
                         continue;
                     }
                     
-                    $order->update_status($this->new_status, "Order status updated due to {$this->days} days since {$this->since}.");
+                    $order->update_status($this->new_status, "Order status updated from {$previous_status} to {$this->new_status} due to {$this->days} days since {$this->since}. ({$this->slug})");
                     
                     /** 
                      * Trigger an action after the order status is updated.
@@ -220,18 +218,24 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                      */
                     do_action("wc_auosot_updated_{$this->slug}", $order, $previous_status, $this->new_status, $this->days);
                 }
-                delete_transient($lock_transient_name);
-
+                
                 // If we hit the limit and there may be more orders left, so run again.
-                if ($this->limit > 0 && count($orders) === $this->limit) {
+                if ($this->limit > 0 && count($orders) >= $this->limit ) {
                     // Make sure the next batch doesn't overlap with any scheduled events.
                     $next_event_timestamp = wp_next_scheduled($this->event_hook);
-                    $expiration = $next_event_timestamp - time() - 10; // 10 seconds buffer
-                    // Set a transient to trigger the next batch.
-                    set_transient($this->event_hook, true, $expiration);
+                    $expiration = $next_event_timestamp - time();
+                    
+                    // Make sure we don't conflict with next crons.
+                    if( $expiration > 90){
+                        // Set a transient to trigger the next batch.
+                        set_transient($this->batching_transient_name, true, $expiration - 90 );
+                    }
                 }
+
+                delete_transient($this->lock_transient_name);
+                wp_cache_flush();
             } catch (Exception $e) {
-                delete_transient($lock_transient_name);
+                $this->clear_events();
                 $this->throw_exception($e->getMessage(), get_class($e));
                 return null;
             }
@@ -243,17 +247,15 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      */
     public function clear_events()
     {
-        if ($this->invalidated) {
-            return null;
-        }
-        delete_transient($this->event_hook);
+        delete_transient($this->lock_transient_name);
+        delete_transient($this->batching_transient_name);
         wp_clear_scheduled_hook($this->event_hook);
     }
 
     /**
      * Update the scheduled event.
      */
-    private function update_events()
+    public function update_events()
     {
         $this->clear_events();
         wp_schedule_event($this->start, $this->frequency, $this->event_hook);
@@ -267,10 +269,6 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      */
     public function __get($name)
     {
-        if ($this->invalidated) {
-            return null;
-        }
-    
         if (property_exists($this, $name)) {
             return $this->{$name};
         }
@@ -292,29 +290,29 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * @param mixed $value The value to set the property to.
      */
     public function __set($name, $value)
-{
-    if ($this->invalidated) {
-        return null;
-    }
-
-    if (property_exists($this, $name)) {
-        if ($this->validate_settings([$name => $value])) {
-
-            if (in_array($name, ['start', 'frequency'])) {
-                $this->update_events();
+    {
+        if (property_exists($this, $name)) {
+            if( in_array($name, self::UNEDITABLE_PROPERTIES) ){
+                $this->throw_exception("Property \"{$name}\" cannot be set directly.");
             }
 
-            return $this->{$name};
+            if ($this->validate_settings([$name => $value])) {
+
+                if (in_array($name, ['start', 'frequency'])) {
+                    $this->update_events();
+                }
+
+                return $this->{$name};
+            }
+                
+            $this->throw_exception(
+                "Invalid value \"{$value}\" provided for property \"{$name}\".",
+                'InvalidArgumentException'
+            );
         }
+
+        $this->throw_exception("Property \"{$name}\" does not exist.", 'InvalidArgumentException');
     }
-
-    $this->throw_exception(
-        "Invalid value \"{$value}\" provided for property \"{$name}\".",
-        'InvalidArgumentException'
-    );
-
-    return null;
-}
 
 
     /**
@@ -341,7 +339,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
             $maybe_validated_value = $this->$method_name($value);
 
             // Ensure that we have returned a proper type.
-            // Will be NULL if the setting is invalid.
+            // Will be NULL type if the setting is invalid.
             if ( gettype($maybe_validated_value) === gettype($this->{$name}) ) {
                 // Set the property
                 $this->{$name} = $maybe_validated_value;
@@ -359,9 +357,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * Validate the days setting.
      * 
      * @param int|string $days The number of days after which an order should be updated.
-     * 
      * @return int|null The number of days after which an order should be updated, or null if the setting is invalid.
-     * @throws InvalidArgumentException If the days setting is invalid.
      */
     protected function validate_days($days)
     {
@@ -418,12 +414,14 @@ class WC_Auto_Update_Order_Statuses_Over_Time
             : [$target_statuses];
 
         // Trigger a WordPress error if the target statuses are not strings.    
-        foreach ($target_statuses as $status) {
+        foreach ($target_statuses as &$status) {
             if (!is_string($status)) {
                 $this->throw_notice('The target statuses must be strings.');
                 return null;
             }
+            $status = $this->normalize_wc_prefix($status);
         }
+
         if ($this->statuses_conflict($this->new_status, $target_statuses)) {
             return null;
         }
@@ -443,11 +441,27 @@ class WC_Auto_Update_Order_Statuses_Over_Time
             $this->throw_notice('The new status must be a string.');
             return null;
         }
+
+        $new_status = $this->normalize_wc_prefix($new_status);
+
         if ($this->statuses_conflict($new_status, $this->target_statuses)) {
             return null;
         }
 
         return $new_status;
+    }
+
+    /**
+     * Remove wc- prefix from a status.
+     * 
+     * @param string $status The status
+     * @return string The status without the prefix
+     */
+    protected function normalize_wc_prefix($status){
+        if( substr($status, 0, 3) === 'wc-' ){
+            $status = substr($status, 3);
+        }
+        return $status;
     }
 
     /**
@@ -457,7 +471,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * @param array $target_statuses The target statuses to check against.
      * @return bool True if the new status is in the target statuses, false otherwise.
      */
-    private function statuses_conflict($new_status, $target_statuses)
+    protected function statuses_conflict($new_status, $target_statuses)
     {
         // Trigger a WordPress error if the new status is in the target statuses.
         if (in_array($new_status, $target_statuses)) {
@@ -527,54 +541,21 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         return $start;
     }
 
-    protected function validate_hide_notices($hide_notices)
-    {
-        if (!is_bool($hide_notices)) {
-            $this->throw_notice('The hide_notices property must be a boolean.');
-            return null;
-        }
-        return $hide_notices;
-    }
-
-    protected function validate_block_exceptions($block_exceptions)
-    {
-        if (!is_bool($block_exceptions)) {
-            $this->throw_notice('The block_exceptions property must be a boolean.');
-            return null;
-        }
-        return $block_exceptions;
-    }
-
     /**
      * Trigger a WordPress error.
      * 
      * @param string $message The message to include in the error.
-     * @param bool $clear_events Whether or not to clear the scheduled event.
+     * @param string $error_class The class of the error to trigger.
+     * @throws E_USER_NOTICE
      */
-    protected function throw_notice($message, $clear_events = true)
+    protected function throw_notice($message)
     {
-        if ($this->hide_notices) {
-            return;
-        }
-
         $message = __CLASS__ . ': ' . $message;
-        if ($clear_events) {
-            $this->clear_events();
-            $message .= ' The scheduled event "' . $this->event_hook . '" has been cleared.';
-        }
+        error_log($message);
 
-        if (WP_DEBUG) {
-            error_log($message);
-        }
-        switch (wp_get_environment_type()) {
-            case 'local':
-            case 'development':
-            case 'staging':
-                trigger_error($message);
-                break;
-            case 'production':
-            default:
-                break;
+        $notifiable_environments = apply_filters('wc_auosot_throw_notice_environments', ['local', 'development', 'staging']);
+        if( in_array( wp_get_environment_type(), $notifiable_environments ) ){
+            trigger_error($message);
         }
     }
 
@@ -583,13 +564,10 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * 
      * @param string $message The message to include in the exception.
      * @param string $exception_class The class of the exception to throw.
+     * @throws Exception
      */
     protected function throw_exception($message, $exception_class = 'Exception')
     {
-        if ($this->block_exceptions) {
-            return;
-        }
-
         $message = __CLASS__ . ': ' . $message;
         throw new $exception_class($message);
     }
