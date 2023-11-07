@@ -103,7 +103,11 @@ class WC_Auto_Update_Order_Statuses_Over_Time
     {
         $this->slug = $slug;
         $this->check_dependencies();
-        $this->init($args);
+        
+        // Make sure the settings are valid.
+        if( ! $this->init($args) ){
+            return;
+        }
 
         // Schedule the event if it's not already scheduled.
         if (!wp_next_scheduled($this->event_hook)) {
@@ -148,9 +152,11 @@ class WC_Auto_Update_Order_Statuses_Over_Time
 
         // Validate the settings and override default property values.
         if ( ! $this->validate_settings($args) ) {
-            $this->throw_exception('Invalid settings provided. Check the WordPress error log for details.', 'InvalidArgumentException');    
-            return;
+            $this->throw_notice('Invalid settings provided. Check the WordPress error log for details.', 'InvalidArgumentException');    
+            return false;
         }
+
+        return true;
     }
 
     /**
@@ -219,6 +225,9 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                     do_action("wc_auosot_updated_{$this->slug}", $order, $previous_status, $this->new_status, $this->days);
                 }
                 
+                delete_transient($this->lock_transient_name);
+                wp_cache_flush();
+
                 // If we hit the limit and there may be more orders left, so run again.
                 if ($this->limit > 0 && count($orders) >= $this->limit ) {
                     // Make sure the next batch doesn't overlap with any scheduled events.
@@ -232,8 +241,6 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                     }
                 }
 
-                delete_transient($this->lock_transient_name);
-                wp_cache_flush();
             } catch (Exception $e) {
                 $this->clear_events();
                 $this->throw_exception($e->getMessage(), get_class($e));
@@ -371,7 +378,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
 
         if ($days < 1) {
             $this->throw_notice('The days must be greater than or equal to 1.');
-            $days = null;
+            return null;
         }
 
         return $days;
@@ -425,6 +432,11 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         if ($this->statuses_conflict($this->new_status, $target_statuses)) {
             return null;
         }
+
+        if( count($target_statuses) < 1){
+            $this->throw_notice('The target statuses must contain at least one status.');
+            return null;
+        }
         return $target_statuses;
     }
 
@@ -439,6 +451,11 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         // Trigger a WordPress error if the target statuses are not strings.
         if (!is_string($new_status)) {
             $this->throw_notice('The new status must be a string.');
+            return null;
+        }
+
+        if( ! $new_status ){
+            $this->throw_notice('The new status cannot be empty.');
             return null;
         }
 
