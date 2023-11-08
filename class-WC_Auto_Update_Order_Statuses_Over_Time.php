@@ -190,6 +190,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                     'status' => $this->target_statuses,
                     'limit' => $this->limit,
                     $this->since => '<=' . $days_ago,
+                    'order' => 'ASC', // Start with the oldest orders.
                     'type'  => 'shop_order', // Excludes subscriptions, refunds, etc. Still returns orders that have been refunded or contain subscription, etc.
                 ];
                 $orders = wc_get_orders($args);
