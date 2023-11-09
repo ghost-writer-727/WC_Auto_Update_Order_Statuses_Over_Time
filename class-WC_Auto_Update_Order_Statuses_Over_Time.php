@@ -3,10 +3,8 @@
 class WC_Auto_Update_Order_Statuses_Over_Time
 {
     const DATE_TYPES = [
-        'date_modified', 
-        'date_created', 
-        'date_completed', 
-        'date_paid'
+        'post_modified', 
+        'post_date', 
     ];
 
     const UNEDITABLE_PROPERTIES = [
@@ -50,7 +48,6 @@ class WC_Auto_Update_Order_Statuses_Over_Time
      * Default is 'date_modified'. See DATE_TYPES for all valid values.
      */
     private string $since;
-    
 
     /**
      * @var array The order statuses that should be updated.
@@ -116,7 +113,8 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         
         // Check if transient exists, in case we are already processing an event that was batched out.
         if (get_transient($this->batching_transient_name)) {
-            $this->update_orders();
+            // Hook it after registering wc shop order post types and statuses.
+            add_action('init', [$this, 'update_orders'], 15);
 
         // Hook into the scheduled event.
         } else {
@@ -143,9 +141,9 @@ class WC_Auto_Update_Order_Statuses_Over_Time
 
         $this->days = 90;
         $this->since = self::DATE_TYPES[0];
-        $this->target_statuses = ['pending'];
-        $this->new_status = 'cancelled';
-        $this->limit = 25;
+        $this->target_statuses = ['wc-pending'];
+        $this->new_status = 'wc-cancelled';
+        $this->limit = 1;//25;
         $this->frequency = 'daily';
         $this->start = time();
 
@@ -157,24 +155,11 @@ class WC_Auto_Update_Order_Statuses_Over_Time
 
         return true;
     }
-
-    /**
-     * Delay starting the process until after all other processes have run.
-     * Because something else was interfering with the Data Store object, 
-     * modifying our query causing it to return all orders regardless of 
-     * status as well as update statuses without the wc- prefix on batch 
-     * runs triggered via batch transient.
-     */
-    public function update_orders()
-    {
-        // Burying this near the end of order of operations.
-        add_action( 'shutdown', [$this, 'really_update_orders']);
-    }
     
     /**
      * Update orders with target statuses that are over a certain number of days old.
      */
-    public function really_update_orders(){
+    public function update_orders(){
         if (!get_transient($this->lock_transient_name)) {
             delete_transient($this->batching_transient_name);
             set_transient($this->lock_transient_name, true, (int) ini_get('max_execution_time') ?: 180);
@@ -183,20 +168,33 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 $current_date = new DateTime();
 
                 // Calculate the date $this->days days ago.
-                $days_ago = $current_date->modify("-{$this->days} days")->format('Y-m-d 00:00:00');
+                $threshold_date = $current_date->modify("-{$this->days} days")->format('Y-m-d 00:00:00');
 
-                // Query for orders with target statuses.
-                $args = [
-                    'status' => $this->target_statuses,
-                    'limit' => $this->limit,
-                    $this->since => '<=' . $days_ago,
-                    'order' => 'ASC', // Start with the oldest orders.
-                    'type'  => 'shop_order', // Excludes subscriptions, refunds, etc. Still returns orders that have been refunded or contain subscription, etc.
-                ];
-                $orders = wc_get_orders($args);
+                // wc_get_orders() Data Stores were getting corrupted by other processes and causing the query to pull in the wrong orders. Therefore, we're using a custom query.
+                global $wpdb;
+
+                // Create a string of placeholders for the IN clause
+                $placeholders = implode(', ', array_fill(0, count($this->target_statuses), '%s'));
+
+                // Prepare the initial query
+                $query = $wpdb->prepare(
+                    "SELECT ID, {$this->since} 
+                    FROM {$wpdb->posts} 
+                    WHERE post_type = 'shop_order' 
+                    AND post_status IN ($placeholders)
+                    AND {$this->since} <= %s
+                    ORDER BY {$this->since} ASC 
+                    LIMIT %d",
+                    array_merge($this->target_statuses, [$threshold_date, $this->limit])
+                );
+
+                // Execute the query
+                $orders = $wpdb->get_results($query);
 
                 // Loop through each order and update its status.
-                foreach ($orders as $order) {
+                foreach ($orders as $order_sql) {
+                    $order = wc_get_order($order_sql->ID);
+
                     $previous_status = $order->get_status();
                     
                     /** 
@@ -212,8 +210,8 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                         // $this->throw_notice("wc_auosot_interrupt_{$this->slug} filter interrupted order {$order->get_id()} status update from {$previous_status} to {$this->new_status}.");
                         continue;
                     }
-                    
-                    $order->update_status($this->new_status, "Order status updated from {$previous_status} to {$this->new_status} due to {$this->days} days since {$this->since}. ({$this->slug})");
+
+                    $order->update_status($this->new_status, "Order status auto-updated from {$previous_status} to {$this->new_status} due to at least {$this->days} days since {$this->since}. ({$this->slug})");
                     
                     /** 
                      * Trigger an action after the order status is updated.
@@ -227,7 +225,6 @@ class WC_Auto_Update_Order_Statuses_Over_Time
                 }
                 
                 delete_transient($this->lock_transient_name);
-                wp_cache_flush();
 
                 // If we hit the limit and there may be more orders left, so run again.
                 if ($this->limit > 0 && count($orders) >= $this->limit ) {
@@ -470,14 +467,14 @@ class WC_Auto_Update_Order_Statuses_Over_Time
     }
 
     /**
-     * Remove wc- prefix from a status.
+     * Add wc- prefix from a status.
      * 
      * @param string $status The status
-     * @return string The status without the prefix
+     * @return string The status with the prefix
      */
     protected function normalize_wc_prefix($status){
-        if( substr($status, 0, 3) === 'wc-' ){
-            $status = substr($status, 3);
+        if( substr($status, 0, 3) !== 'wc-' ){
+            $status = 'wc-' . $status;
         }
         return $status;
     }
