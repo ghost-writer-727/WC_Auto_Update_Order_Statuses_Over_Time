@@ -143,7 +143,7 @@ class WC_Auto_Update_Order_Statuses_Over_Time
         $this->since = self::DATE_TYPES[0];
         $this->target_statuses = ['wc-pending'];
         $this->new_status = 'wc-cancelled';
-        $this->limit = 1;//25;
+        $this->limit = 25;
         $this->frequency = 'daily';
         $this->start = time();
 
